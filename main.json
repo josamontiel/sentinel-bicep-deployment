@@ -1,0 +1,580 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.43.8.12551",
+      "templateHash": "9306859716690717355"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": {
+        "description": "Azure region for the resource group and all resources."
+      }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "rg-sentinel-lab",
+      "metadata": {
+        "description": "Name of the resource group to create for the lab."
+      }
+    },
+    "workspaceName": {
+      "type": "string",
+      "defaultValue": "law-sentinel-lab",
+      "minLength": 4,
+      "maxLength": 63,
+      "metadata": {
+        "description": "Name of the Log Analytics workspace that backs Microsoft Sentinel."
+      }
+    },
+    "retentionInDays": {
+      "type": "int",
+      "defaultValue": 90,
+      "minValue": 30,
+      "maxValue": 730,
+      "metadata": {
+        "description": "Data retention in days. 90 days is included free when Sentinel is enabled."
+      }
+    },
+    "dailyQuotaGb": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "Daily ingestion cap in GB to protect lab spend. Set to -1 for unlimited."
+      }
+    },
+    "enableAzureActivity": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Stream the subscription Activity log into the workspace (the Azure Activity connector)."
+      }
+    },
+    "enableDefenderForCloud": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable the Microsoft Defender for Cloud data connector."
+      }
+    },
+    "enableEntraId": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Enable the Microsoft Entra ID connector. NOTE: actually flowing sign-in/audit logs also requires tenant-level diagnostic settings and Global Administrator rights — see README."
+      }
+    },
+    "enableWorkbooks": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy the lab workbooks."
+      }
+    },
+    "installContentHubSolutions": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Install Content Hub solutions (packaged connectors, workbook/rule templates, hunting queries)."
+      }
+    },
+    "contentHubSolutionPackageIds": {
+      "type": "array",
+      "defaultValue": [
+        "azuresentinel.azure-sentinel-solution-azureactivity",
+        "azuresentinel.azure-sentinel-solution-azureactivedirectory",
+        "azuresentinel.azure-sentinel-solution-microsoftdefenderforcloud"
+      ],
+      "metadata": {
+        "description": "Content Hub solution package IDs to install. Defaults match the connectors enabled above."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "environment": "lab",
+        "workload": "sentinel",
+        "managedBy": "bicep"
+      },
+      "metadata": {
+        "description": "Tags applied to every resource."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('resourceGroupName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "condition": "[parameters('enableAzureActivity')]",
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "sentinel-activity-to-law",
+      "properties": {
+        "workspaceId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics'), '2025-04-01').outputs.workspaceId.value]",
+        "logs": [
+          {
+            "category": "Administrative",
+            "enabled": true
+          },
+          {
+            "category": "Security",
+            "enabled": true
+          },
+          {
+            "category": "ServiceHealth",
+            "enabled": true
+          },
+          {
+            "category": "Alert",
+            "enabled": true
+          },
+          {
+            "category": "Recommendation",
+            "enabled": true
+          },
+          {
+            "category": "Policy",
+            "enabled": true
+          },
+          {
+            "category": "Autoscale",
+            "enabled": true
+          },
+          {
+            "category": "ResourceHealth",
+            "enabled": true
+          }
+        ]
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "deploy-loganalytics",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "workspaceName": {
+            "value": "[parameters('workspaceName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "retentionInDays": {
+            "value": "[parameters('retentionInDays')]"
+          },
+          "dailyQuotaGb": {
+            "value": "[parameters('dailyQuotaGb')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "5144890717554808804"
+            }
+          },
+          "parameters": {
+            "workspaceName": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 63,
+              "metadata": {
+                "description": "Workspace name."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "retentionInDays": {
+              "type": "int",
+              "defaultValue": 90,
+              "minValue": 30,
+              "maxValue": 730,
+              "metadata": {
+                "description": "Retention in days."
+              }
+            },
+            "dailyQuotaGb": {
+              "type": "int",
+              "defaultValue": 1,
+              "metadata": {
+                "description": "Daily ingestion cap in GB. -1 = unlimited."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Resource tags."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[parameters('workspaceName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": "[parameters('retentionInDays')]",
+                "workspaceCapping": {
+                  "dailyQuotaGb": "[parameters('dailyQuotaGb')]"
+                },
+                "features": {
+                  "immediatePurgeDataOn30Days": true
+                },
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+              }
+            }
+          ],
+          "outputs": {
+            "workspaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+            },
+            "workspaceName": {
+              "type": "string",
+              "value": "[parameters('workspaceName')]"
+            },
+            "customerId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), '2023-09-01').customerId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "deploy-sentinel",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "workspaceName": {
+            "value": "[parameters('workspaceName')]"
+          },
+          "enableDefenderForCloud": {
+            "value": "[parameters('enableDefenderForCloud')]"
+          },
+          "enableEntraId": {
+            "value": "[parameters('enableEntraId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "2506149345310587153"
+            }
+          },
+          "parameters": {
+            "workspaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing Log Analytics workspace to onboard."
+              }
+            },
+            "enableDefenderForCloud": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Enable the Microsoft Defender for Cloud connector."
+              }
+            },
+            "enableEntraId": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable the Microsoft Entra ID connector (see README for the extra tenant-level requirements)."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.SecurityInsights/onboardingStates",
+              "apiVersion": "2024-09-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "default",
+              "properties": {}
+            },
+            {
+              "condition": "[parameters('enableDefenderForCloud')]",
+              "type": "Microsoft.SecurityInsights/dataConnectors",
+              "apiVersion": "2024-03-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'AzureSecurityCenter')]",
+              "kind": "AzureSecurityCenter",
+              "properties": {
+                "subscriptionId": "[subscription().subscriptionId]",
+                "dataTypes": {
+                  "alerts": {
+                    "state": "enabled"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/onboardingStates', 'default')]"
+              ]
+            },
+            {
+              "condition": "[parameters('enableEntraId')]",
+              "type": "Microsoft.SecurityInsights/dataConnectors",
+              "apiVersion": "2024-03-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'AzureActiveDirectory')]",
+              "kind": "AzureActiveDirectory",
+              "properties": {
+                "tenantId": "[subscription().tenantId]",
+                "dataTypes": {
+                  "alerts": {
+                    "state": "enabled"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/onboardingStates', 'default')]"
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableWorkbooks')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "deploy-workbooks",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "workspaceResourceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics'), '2025-04-01').outputs.workspaceId.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "1900371374120032663"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "workspaceResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the Log Analytics / Sentinel workspace."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Resource tags."
+              }
+            }
+          },
+          "variables": {
+            "$fxv#0": "{\n  \"version\": \"Notebook/1.0\",\n  \"items\": [\n    {\n      \"type\": 1,\n      \"content\": {\n        \"json\": \"# Azure Activity — Lab Overview\\nControl-plane activity ingested into this workspace through the Azure Activity connector. Adjust the time range with the workbook time picker.\"\n      },\n      \"name\": \"title\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"AzureActivity\\n| summarize Events = count() by bin(TimeGenerated, 1h)\\n| order by TimeGenerated asc\",\n        \"size\": 0,\n        \"title\": \"Activity events over time\",\n        \"timeContext\": { \"durationMs\": 604800000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"timechart\"\n      },\n      \"name\": \"events-over-time\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"AzureActivity\\n| summarize Operations = count() by Caller\\n| top 10 by Operations desc\",\n        \"size\": 0,\n        \"title\": \"Top 10 callers\",\n        \"timeContext\": { \"durationMs\": 604800000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"barchart\"\n      },\n      \"name\": \"top-callers\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"AzureActivity\\n| where ActivityStatusValue in ('Failed', 'Failure')\\n| summarize Failures = count() by OperationNameValue, ResourceGroup\\n| top 15 by Failures desc\",\n        \"size\": 0,\n        \"title\": \"Failed operations\",\n        \"timeContext\": { \"durationMs\": 604800000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"table\"\n      },\n      \"name\": \"failed-ops\"\n    }\n  ],\n  \"$schema\": \"https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json\"\n}\n",
+            "$fxv#1": "{\n  \"version\": \"Notebook/1.0\",\n  \"items\": [\n    {\n      \"type\": 1,\n      \"content\": {\n        \"json\": \"# Sentinel — Ingestion & Alert Health (Lab)\\nData volume by table and security alerts by severity. Useful for keeping a lab workspace within its daily ingestion cap.\"\n      },\n      \"name\": \"title\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"Usage\\n| where IsBillable == true\\n| summarize IngestedGB = round(sum(Quantity) / 1000, 3) by DataType\\n| top 15 by IngestedGB desc\",\n        \"size\": 0,\n        \"title\": \"Billable ingestion by table (GB)\",\n        \"timeContext\": { \"durationMs\": 2592000000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"barchart\"\n      },\n      \"name\": \"ingest-by-table\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"SecurityAlert\\n| summarize Alerts = count() by AlertSeverity\\n| order by Alerts desc\",\n        \"size\": 0,\n        \"title\": \"Security alerts by severity\",\n        \"timeContext\": { \"durationMs\": 2592000000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"piechart\"\n      },\n      \"name\": \"alerts-by-severity\"\n    },\n    {\n      \"type\": 3,\n      \"content\": {\n        \"version\": \"KqlItem/1.0\",\n        \"query\": \"union withsource=TableName *\\n| where TimeGenerated > ago(24h)\\n| summarize Records = count() by TableName\\n| top 20 by Records desc\",\n        \"size\": 0,\n        \"title\": \"Records ingested in the last 24h by table\",\n        \"timeContext\": { \"durationMs\": 86400000 },\n        \"queryType\": 0,\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\n        \"visualization\": \"table\"\n      },\n      \"name\": \"records-24h\"\n    }\n  ],\n  \"$schema\": \"https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json\"\n}\n"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/workbooks",
+              "apiVersion": "2023-06-01",
+              "name": "[guid(parameters('workspaceResourceId'), 'activity-overview')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "shared",
+              "properties": {
+                "displayName": "Lab — Azure Activity Overview",
+                "category": "sentinel",
+                "sourceId": "[parameters('workspaceResourceId')]",
+                "version": "Notebook/1.0",
+                "serializedData": "[variables('$fxv#0')]"
+              }
+            },
+            {
+              "type": "Microsoft.Insights/workbooks",
+              "apiVersion": "2023-06-01",
+              "name": "[guid(parameters('workspaceResourceId'), 'sentinel-health')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "shared",
+              "properties": {
+                "displayName": "Lab — Sentinel Ingestion & Alert Health",
+                "category": "sentinel",
+                "sourceId": "[parameters('workspaceResourceId')]",
+                "version": "Notebook/1.0",
+                "serializedData": "[variables('$fxv#1')]"
+              }
+            }
+          ],
+          "outputs": {
+            "activityWorkbookId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/workbooks', guid(parameters('workspaceResourceId'), 'activity-overview'))]"
+            },
+            "healthWorkbookId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/workbooks', guid(parameters('workspaceResourceId'), 'sentinel-health'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-sentinel')]"
+      ]
+    },
+    {
+      "condition": "[parameters('installContentHubSolutions')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "deploy-contenthub",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "workspaceName": {
+            "value": "[parameters('workspaceName')]"
+          },
+          "solutionPackageIds": {
+            "value": "[parameters('contentHubSolutionPackageIds')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "17986755442474438281"
+            }
+          },
+          "parameters": {
+            "workspaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing Sentinel-enabled Log Analytics workspace."
+              }
+            },
+            "solutionPackageIds": {
+              "type": "array",
+              "metadata": {
+                "description": "Content Hub solution package IDs to install (the offer-style id, e.g. azuresentinel.azure-sentinel-solution-azureactivity)."
+              }
+            }
+          },
+          "resources": [
+            {
+              "copy": {
+                "name": "install",
+                "count": "[length(parameters('solutionPackageIds'))]"
+              },
+              "type": "Microsoft.SecurityInsights/contentPackages",
+              "apiVersion": "2024-09-01",
+              "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+              "name": "[parameters('solutionPackageIds')[copyIndex()]]",
+              "properties": {
+                "contentId": "[reference(extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/contentProductPackages', parameters('solutionPackageIds')[copyIndex()]), '2024-09-01').contentId]",
+                "contentKind": "[reference(extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/contentProductPackages', parameters('solutionPackageIds')[copyIndex()]), '2024-09-01').contentKind]",
+                "contentProductId": "[reference(extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/contentProductPackages', parameters('solutionPackageIds')[copyIndex()]), '2024-09-01').contentProductId]",
+                "displayName": "[reference(extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/contentProductPackages', parameters('solutionPackageIds')[copyIndex()]), '2024-09-01').displayName]",
+                "version": "[reference(extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/contentProductPackages', parameters('solutionPackageIds')[copyIndex()]), '2024-09-01').version]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-sentinel')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "workspaceResourceId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics'), '2025-04-01').outputs.workspaceId.value]"
+    },
+    "workspaceName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'deploy-loganalytics'), '2025-04-01').outputs.workspaceName.value]"
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "value": "[parameters('resourceGroupName')]"
+    }
+  }
+}

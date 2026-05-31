@@ -1,0 +1,55 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Sentinel — Ingestion & Alert Health (Lab)\nData volume by table and security alerts by severity. Useful for keeping a lab workspace within its daily ingestion cap."
+      },
+      "name": "title"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "Usage\n| where IsBillable == true\n| summarize IngestedGB = round(sum(Quantity) / 1000, 3) by DataType\n| top 15 by IngestedGB desc",
+        "size": 0,
+        "title": "Billable ingestion by table (GB)",
+        "timeContext": { "durationMs": 2592000000 },
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      },
+      "name": "ingest-by-table"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "SecurityAlert\n| summarize Alerts = count() by AlertSeverity\n| order by Alerts desc",
+        "size": 0,
+        "title": "Security alerts by severity",
+        "timeContext": { "durationMs": 2592000000 },
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "piechart"
+      },
+      "name": "alerts-by-severity"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "union withsource=TableName *\n| where TimeGenerated > ago(24h)\n| summarize Records = count() by TableName\n| top 20 by Records desc",
+        "size": 0,
+        "title": "Records ingested in the last 24h by table",
+        "timeContext": { "durationMs": 86400000 },
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table"
+      },
+      "name": "records-24h"
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
