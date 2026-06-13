@@ -1,6 +1,6 @@
 using './main.bicep'
 
-param location = 'uksouth'
+param location = 'eastus'
 param resourceGroupName = 'rg-sentinel-lab'
 param workspaceName = 'law-sentinel-lab'
 
