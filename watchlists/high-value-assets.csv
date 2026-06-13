@@ -1,0 +1,5 @@
+SearchKey,AssetName,Owner,Tier
+10.0.0.10,dc01,platform-team,Tier0
+10.0.0.11,dc02,platform-team,Tier0
+203.0.113.50,vpn-gateway,network-team,Tier1
+198.51.100.23,jump-host,secops,Tier1
