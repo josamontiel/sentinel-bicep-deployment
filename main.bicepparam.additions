@@ -1,0 +1,16 @@
+// =============================================================================
+//  Append these to your existing main.bicepparam.
+// =============================================================================
+
+// Required: where the response playbook posts incident notifications.
+// A Teams "Incoming Webhook" or Slack webhook URL both work.
+param notificationWebhookUrl = 'https://example.com/webhook/REPLACE_ME'
+
+// Recommended: lets automation rules run the playbook end-to-end.
+// Get it with:  ./scripts/get-sentinel-sp.sh
+param sentinelAutomationPrincipalObjectId = ''
+
+// Recommended: lets you POST synthetic events with simulate-attack.sh.
+// Your own object ID:  az ad signed-in-user show --query id -o tsv
+param ingestionPrincipalObjectId = ''
+param ingestionPrincipalType = 'User'
