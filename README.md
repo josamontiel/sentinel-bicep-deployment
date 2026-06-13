@@ -1,70 +1,164 @@
-# Microsoft Sentinel automation lab (Bicep)
+# Microsoft Sentinel automation lab (Bicep) — detection & response edition
 
 End-to-end infrastructure-as-code that stands up a self-contained Microsoft
-Sentinel environment for testing and learning. One `az deployment sub create`
-gives you a resource group, a Log Analytics workspace, Sentinel onboarded on
-top of it, a couple of basic data connectors switched on, and two starter
-workbooks.
+Sentinel environment **and** the operational layer on top of it: custom
+detections, incident-triage automation, a response playbook, a watchlist, a
+Windows Security Events (AMA) connector, and a synthetic-data path so you can
+trigger the whole pipeline on demand.
+
+This extends the original
+[`sentinel-bicep-deployment`](https://github.com/josamontiel/sentinel-bicep-deployment)
+(workspace + Sentinel onboarding + connectors + Content Hub + workbooks) by
+filling the gap its README flagged — turning installed *content* into running
+*detections and responses*.
+
+## The loop this builds
+
+```
+simulate-attack.sh ─► SecurityLabEvents_CL ─► analytics rule ─► incident
+                                                                    │
+                                                automation rule ◄───┘
+                                                (severity, tag, run playbook)
+                                                                    │
+                                                              playbook (Logic App)
+                                                              ─► webhook notification
+```
+
+The detections also read a `HighValueAssets` watchlist, and a separate Windows
+Security Events (AMA) connector can feed the real `SecurityEvent` table in
+parallel.
 
 ## What gets deployed
 
-| Resource | Type | API version |
-|---|---|---|
-| Resource group | `Microsoft.Resources/resourceGroups` | 2024-03-01 |
-| Log Analytics workspace | `Microsoft.OperationalInsights/workspaces` | 2023-09-01 |
-| Sentinel onboarding | `Microsoft.SecurityInsights/onboardingStates` | 2024-09-01 |
-| Defender for Cloud connector | `Microsoft.SecurityInsights/dataConnectors` (`AzureSecurityCenter`) | 2024-03-01 |
-| Entra ID connector (optional) | `Microsoft.SecurityInsights/dataConnectors` (`AzureActiveDirectory`) | 2024-03-01 |
-| Azure Activity → workspace | `Microsoft.Insights/diagnosticSettings` (subscription scope) | 2021-05-01-preview |
-| Content Hub solutions | `Microsoft.SecurityInsights/contentPackages` (+ `contentProductPackages` read) | 2024-09-01 |
-| Workbooks ×2 | `Microsoft.Insights/workbooks` | 2023-06-01 |
+| Resource | Type | Source |
+| --- | --- | --- |
+| Resource group | `Microsoft.Resources/resourceGroups` | base |
+| Log Analytics workspace | `Microsoft.OperationalInsights/workspaces` | base |
+| Sentinel onboarding | `Microsoft.SecurityInsights/onboardingStates` | base (gated) |
+| Azure Activity → workspace | `Microsoft.Insights/diagnosticSettings` (sub scope) | base |
+| Data connectors (optional) | `Microsoft.SecurityInsights/dataConnectors` | base (gated, off by default) |
+| Content Hub solutions (optional) | `Microsoft.SecurityInsights/contentPackages` | base |
+| Workbooks ×2 | `Microsoft.Insights/workbooks` | base |
+| Security Events via AMA | `Microsoft.Insights/dataCollectionRules` (+ AMA, associations) | extension |
+| Custom table + DCE + DCR | `…/tables`, `dataCollectionEndpoints`, `dataCollectionRules` | extension |
+| Watchlist | `Microsoft.SecurityInsights/watchlists` | extension |
+| Analytics rules ×2 (+optional template) | `Microsoft.SecurityInsights/alertRules` | extension |
+| Automation rule | `Microsoft.SecurityInsights/automationRules` | extension |
+| Playbook (Logic App) + connection | `Microsoft.Logic/workflows`, `Microsoft.Web/connections` | extension |
+| Role assignments | `Microsoft.Authorization/roleAssignments` | extension |
+
+## Repository structure
 
 ```
-sentinel-lab/
-├── main.bicep              # subscription-scoped orchestrator
-├── main.bicepparam         # edit your values here
+sentinel-automation/
+├── main.bicep                      # subscription-scoped orchestrator
+├── main.bicepparam                 # your values
+├── README.md                       # this file
 ├── modules/
-│   ├── loganalytics.bicep  # workspace
-│   ├── sentinel.bicep      # onboarding + connectors
-│   ├── contenthub.bicep    # Content Hub solution installs
-│   └── workbooks.bicep      # loads the JSON definitions below
+│   ├── loganalytics.bicep          # workspace
+│   ├── sentinel.bicep              # onboarding + connectors (both gated)
+│   ├── contenthub.bicep            # Content Hub solution installs
+│   ├── workbooks.bicep             # workbook loader
+│   ├── securityevents-ama.bicep    # Windows Security Events via AMA (DCR)
+│   ├── ingest.bicep                # custom table + DCE + DCR (synthetic data)
+│   ├── watchlists.bicep            # HighValueAssets watchlist
+│   ├── analyticsrules.bicep        # 2 detections (+ optional template rule)
+│   ├── automationrules.bicep       # incident triage automation
+│   └── playbook.bicep              # Logic App + connection + role assignments
 ├── workbooks/
 │   ├── activity-overview.json
 │   └── sentinel-health.json
+├── watchlists/
+│   └── high-value-assets.csv
 └── scripts/
-    ├── deploy.sh           # validate → what-if → deploy
-    └── teardown.sh         # delete the RG + subscription diag setting
+    ├── deploy.sh                   # validate → what-if → deploy
+    ├── teardown.sh                 # delete RG + sub diag setting
+    ├── simulate-attack.sh          # POST synthetic events
+    └── get-sentinel-sp.sh          # resolve the Sentinel SP object ID
 ```
-
-## Why subscription scope
-
-`main.bicep` uses `targetScope = 'subscription'` for two reasons: it creates the
-resource group itself, and the modern Azure Activity connector is a
-**subscription-level diagnostic setting** that routes the Activity log into the
-workspace. Everything else is deployed into the resource group via modules.
 
 ## Prerequisites
 
-- Azure CLI 2.50+ (`az version`). Bicep is bundled; run `az bicep upgrade` to be current.
+- Azure CLI 2.50+ (`az version`); run `az bicep upgrade` to get current.
 - An Azure subscription you can deploy to.
-- **RBAC to run the deployment:** `Owner` or `Contributor` + `User Access
-  Administrator` at the subscription is the simplest. At minimum you need rights
-  to create resource groups, write the workspace, write
-  `Microsoft.SecurityInsights/*`, and write subscription diagnostic settings
-  (`Monitoring Contributor`).
+- RBAC: because the extension creates role assignments, `Owner`, or
+  `Contributor` + `User Access Administrator` at the subscription, is simplest.
+- For the response playbook: a Teams or Slack incoming webhook URL.
+
+## Important: Defender-portal-managed ("unified SecOps") workspaces
+
+If your workspace is onboarded to the Microsoft Defender portal (unified
+security operations), Microsoft **blocks connector writes through ARM/Bicep**.
+You'll see:
+
+> The workspace is enabled through the Microsoft Threat Protection Portal.
+> Changes to the connector in Microsoft Sentinel are disabled.
+
+This is a platform rule, not a template bug. The lab is configured to coexist
+with it:
+
+- **`Microsoft.SecurityInsights/dataConnectors` are gated off** in
+  `sentinel.bicep` (`deployDataConnectors = false`). Manage those connectors
+  from the Defender portal instead.
+- **Security Events via AMA still works in code**, because it's a Data
+  Collection Rule (an Azure Monitor resource), not a `dataConnectors` write — so
+  it isn't subject to the block. That's why this lab does Security Events as a
+  DCR.
+- **Sentinel onboarding** is also gated (`onboardSentinel`). On a workspace
+  already onboarded via the Defender portal you can leave it `true` (the PUT is
+  idempotent and succeeds) or set it `false` if a re-PUT is rejected.
+
+### Recommended parameter values for a Defender-managed workspace
+
+```bicep
+param onboardSentinel = true            // (in the sentinel module call)
+param deployDataConnectors = false      // connectors managed in the Defender portal
+param enableAzureActivity = true        // sub diagnostic setting — always works
+param enableSecurityEventsAma = true    // DCR — works in code
+param installContentHubSolutions = false // see Content Hub note below
+```
+
+## Configure
+
+Edit `main.bicepparam`. Key parameters:
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `location` | `eastus` | Region for everything. AMA VM associations must match this. |
+| `workspaceName` | `law-sentinel-lab` | Existing or new workspace name. |
+| `dailyQuotaGb` | `1` | Lab spend guard. `-1` = unlimited. |
+| `enableAzureActivity` | `true` | Subscription Activity log → workspace. |
+| `deployDataConnectors` | `false` | Keep false on Defender-managed workspaces. |
+| `enableSecurityEventsAma` | `true` | Deploys the Security Events DCR. |
+| `securityEventsTier` | `All` | `All` / `Common` / `Minimal` / `Custom`. |
+| `securityEventsVmNames` | `[]` | Existing Windows VM names to onboard with AMA. |
+| `installContentHubSolutions` | `false` | See note below. |
+| `notificationWebhookUrl` | — | Teams/Slack webhook for the playbook (required). |
+| `sentinelAutomationPrincipalObjectId` | `''` | Run `scripts/get-sentinel-sp.sh`. |
+| `ingestionPrincipalObjectId` | `''` | Your object ID for posting synthetic events. |
+
+Helper lookups:
+
+```bash
+./scripts/get-sentinel-sp.sh                          # automation SP object ID
+az ad signed-in-user show --query id -o tsv           # your object ID
+```
 
 ## Deploy
 
 ```bash
-# 1. Pick your subscription
 az account set --subscription "<your-sub-id>"
 
-# 2. Edit main.bicepparam (names, region, which connectors)
+# Always preview first
+az deployment sub what-if \
+  --name sentinel-lab \
+  --location eastus \
+  --template-file ./main.bicep \
+  --parameters ./main.bicepparam
 
-# 3. Deploy (validates, shows a what-if, then prompts)
+# Then deploy
 ./scripts/deploy.sh eastus
-
-# …or run it directly:
+# …or directly:
 az deployment sub create \
   --name sentinel-lab \
   --location eastus \
@@ -72,84 +166,108 @@ az deployment sub create \
   --parameters ./main.bicepparam
 ```
 
+If `deploy.sh` references `main.json`, regenerate it after any Bicep edit
+(`az bicep build --file ./main.bicep`) or deploy `main.bicep` directly — a stale
+`main.json` will silently ignore your changes.
+
 ## Verify
 
-1. Portal → **Microsoft Sentinel** → your workspace should be listed.
-2. **Data connectors** → *Microsoft Defender for Cloud* shows Connected.
-3. **Workbooks** → *My workbooks* → the two "Lab —" workbooks appear.
-4. Activity data takes a few minutes to land. Check with:
-   ```kusto
-   AzureActivity | take 50
-   ```
+1. **Sentinel → your workspace** is listed.
+2. Activity data lands within minutes: `AzureActivity | take 50`.
+3. Security Events (once a VM is associated): `SecurityEvent | take 50`.
+4. Workbooks appear under **Workbooks → My workbooks** ("Lab —").
+
+## Run the detection loop
+
+Grab the ingestion outputs, then fire synthetic events:
+
+```bash
+az deployment sub show -n sentinel-lab --query "properties.outputs" -o json
+# Use dceLogsIngestionEndpoint + dcrImmutableId from the lab-ingest module.
+
+./scripts/simulate-attack.sh "<dceLogsIngestionEndpoint>" "<dcrImmutableId>"
+```
+
+The payload trips two rules: **Repeated sign-in failures** (5 failures from one
+IP) and **Suspicious activity involving a high-value asset** (an event from
+`10.0.0.10`, which is on the `HighValueAssets` watchlist). Within ~5–15 minutes
+you should see `Lab —` incidents in **Sentinel → Incidents**, auto-bumped to
+High and tagged `lab`, with the playbook posting to your webhook.
+
+## Security Events via AMA
+
+`modules/securityevents-ama.bicep` is the connector, expressed as a Data
+Collection Rule routing `Microsoft-SecurityEvent` into the workspace. The DCR is
+the connector; data only flows once it's associated with a Windows machine
+running the Azure Monitor Agent.
+
+- **DCR only** (`securityEventsVmNames = []`): connector shows configured, but
+  `SecurityEvent` stays empty.
+- **With VMs**: list existing Windows VM names (same RG, same region as
+  `location`). The module installs AMA and creates the association, and data
+  begins flowing.
+
+Switch `securityEventsTier` to `Common` to cut volume. The `Common`/`Minimal`
+xPath lists in the module are compact high-signal subsets, not the verbatim
+official catalog lists.
 
 ## Content Hub solutions
 
-`modules/contenthub.bicep` installs Content Hub *solutions* — the modern,
-packaged way to get Sentinel content. Each solution bundles a data connector
-definition, workbook templates, analytics-rule templates, and hunting queries
-into a single install. The defaults match the connectors this lab enables:
+`installContentHubSolutions` defaults to **off**. On Defender-managed workspaces
+the module's "read the catalog entry to get the latest version"
+(`contentProductPackages`) step can return **404** even though the portal shows
+the solutions connected — the portal state comes from the Defender side, which
+isn't the same object the ARM read targets.
 
-| Package ID | Solution |
-|---|---|
-| `azuresentinel.azure-sentinel-solution-azureactivity` | Azure Activity |
-| `azuresentinel.azure-sentinel-solution-azureactivedirectory` | Microsoft Entra ID |
-| `azuresentinel.azure-sentinel-solution-microsoftdefenderforcloud` | Microsoft Defender for Cloud |
+Options:
 
-Edit `contentHubSolutionPackageIds` in `main.bicepparam` to install more. Find
-package IDs in the portal (**Content hub** → pick a solution → **View details** →
-*Download a template for automation*, where the `name` of the
-`contentPackages`/`contentProductPackages` resource is the ID), or browse the
-[content hub catalog](https://learn.microsoft.com/azure/sentinel/sentinel-solutions-catalog).
+- **Recommended:** leave it `false` and install/manage solutions from the
+  Defender portal's Content hub. The lab's detections don't depend on them.
+- **In code:** rewrite `contenthub.bicep` to install `contentPackages` with an
+  explicit pinned `version` per package, dropping the `contentProductPackages`
+  read that 404s. Confirm what's installed first:
 
-**How the version stays current:** instead of hardcoding a solution version, the
-module reads each package's live catalog entry (`contentProductPackages`, a
-read-only resource) and installs exactly that version. Re-running the deployment
-picks up newer published versions.
+```bash
+az rest --method get \
+  --url "https://management.azure.com/subscriptions/<sub>/resourceGroups/rg-sentinel-lab/providers/Microsoft.OperationalInsights/workspaces/law-sentinel-lab/providers/Microsoft.SecurityInsights/contentPackages?api-version=2024-09-01"
+```
 
-**What "install" does and doesn't do — important:** installing a solution makes
-its content *available*. It does **not** automatically connect data sources or
-turn rule templates into running rules. So the pieces relate like this:
+## Data connectors
 
-- *Solution install* (this module) → puts the connector definition, workbook
-  templates, and rule templates into your workspace.
-- *Connector enablement* (`modules/sentinel.bicep` + the Azure Activity
-  diagnostic setting) → actually starts the data flowing.
-- *Analytics rules* → after install, go to **Analytics → Rule templates**, pick a
-  template the solution added, and **Create rule** to make it active. (Want this
-  automated too? Ask and I'll add a `Microsoft.SecurityInsights/alertRules`
-  example that instantiates a template.)
+On a Defender-managed workspace, enable Defender for Cloud / Entra ID connectors
+from the **Defender portal**, not Bicep. Content Hub solutions also bundle
+connector definitions, so connectors can appear "connected" after a solution
+install or a portal refresh without any `dataConnectors` ARM resource. "Connected"
+in the UI is not the same as data flowing — verify with a table query.
 
-There's intentional overlap with the standalone connectors: the solution gives
-you the *content*, the connector resources give you the *data*. They coexist
-cleanly — no conflict from running both.
+To keep connectors in code, deploy the lab against a **separate, non-Defender-
+managed workspace**; the ARM block applies only to the primary workspace, so
+`deployDataConnectors = true` succeeds there.
 
+## Troubleshooting
 
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `BadRequest` — "enabled through the Microsoft Threat Protection Portal" on `deploy-sentinel` | ARM connector/onboarding write on a Defender-managed workspace | `deployDataConnectors = false`; if it's the onboarding op, `onboardSentinel = false` |
+| `404` on `contentProductPackages` (`deploy-contenthub`) | Catalog-version read not resolvable on this workspace | `installContentHubSolutions = false`, or pin versions (see above) |
+| `BCP037` "property X is not allowed on objects of type params" | Module call passes a param the module file doesn't declare | The edited module file wasn't saved over the repo file — overwrite it |
+| Edits "don't take" between deploys | Deploying a stale compiled `main.json` | Deploy `main.bicep`, or rebuild `main.json` |
+| `SecurityEvent` empty after AMA deploy | No VM associated, or VM region ≠ DCR region | Add `securityEventsVmNames`; match `location` |
 
-- **Azure Activity** (`enableAzureActivity`, on by default) — fully functional
-  from this template. The subscription diagnostic setting starts populating the
-  `AzureActivity` table within minutes, no extra steps.
-- **Defender for Cloud** (`enableDefenderForCloud`, on by default) — deploys
-  cleanly. To actually receive alerts you also need Defender for Cloud enabled on
-  the subscription; the connector just wires Sentinel to consume them.
-- **Microsoft Entra ID** (`enableEntraId`, **off by default**) — the connector
-  resource only flips the Sentinel-side toggle. Sign-in and audit logs flow only
-  after a **tenant-level** diagnostic setting (`microsoft.aadiam/diagnosticSettings`)
-  is created, which requires **Global Administrator** or **Security Administrator**
-  and is a tenant-scoped operation outside this subscription-scoped template. It's
-  left off so the lab deploys cleanly for anyone; enable it once you've handled the
-  tenant side. Deploying the connector without the right tenant permissions can
-  fail validation.
+To see exactly which resource failed inside a module:
 
-Many other connectors (Office 365, AWS, threat intel, etc.) have moved to the
-Content Hub solution model and are best installed from there rather than as raw
-`dataConnectors` resources.
+```bash
+az deployment operation group list -g rg-sentinel-lab -n <module-deployment-name> \
+  --query "[?properties.provisioningState=='Failed'].{type:properties.targetResource.resourceType, name:properties.targetResource.resourceName, msg:properties.statusMessage}" \
+  -o jsonc
+```
 
 ## Cost guardrails
 
-This is a lab, so the workspace ships with `dailyQuotaGb = 1` and
-`immediatePurgeDataOn30Days = true`. Sentinel includes 90 days of free retention.
-Raise `dailyQuotaGb` to `-1` (unlimited) only when you understand the ingestion
-cost. The *Sentinel Ingestion & Alert Health* workbook helps you watch volume.
+The workspace ships with `dailyQuotaGb = 1` and Sentinel's 90-day free
+retention. AMA `All`-tier Security Events and any associated VM are the main
+cost drivers — use `Common`, stop/deallocate lab VMs when idle, and raise the
+quota only when you understand the ingestion cost.
 
 ## Tear down
 
@@ -159,13 +277,7 @@ cost. The *Sentinel Ingestion & Alert Health* workbook helps you watch volume.
 az monitor diagnostic-settings subscription delete --name sentinel-activity-to-law
 ```
 
-## Customising
-
-- **Add a connector:** add a `Microsoft.SecurityInsights/dataConnectors@2024-03-01`
-  resource in `modules/sentinel.bicep`, scoped to the workspace, with a
-  `dependsOn: [onboarding]`.
-- **Add a workbook:** drop a new `*.json` into `workbooks/` and add a resource in
-  `modules/workbooks.bicep` using `loadTextContent('../workbooks/<file>.json')`.
-- The workbook JSON is the standard Azure Workbooks serialized format; you can
-  build one in the portal, click *Edit → Advanced Editor → Gallery Template*, and
-  paste it into a file here.
+Deleting the resource group removes everything deployed into it (workspace,
+Sentinel content, rules, automation, playbook, DCRs, watchlist, and the
+RG-scoped role assignments). Connectors and solutions you enabled in the Defender
+portal are managed there and may need separate cleanup.
